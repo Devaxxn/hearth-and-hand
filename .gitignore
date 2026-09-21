@@ -6,3 +6,6 @@ dist-ssr
 dev.log
 e2e/*.mjs
 tsconfig.tsbuildinfo
+.freebuff/
+.vite/
+assets/

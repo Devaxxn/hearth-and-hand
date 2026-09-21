@@ -108,20 +108,30 @@ export const Muse = ({ onOpenRecipe }: { onOpenRecipe: (recipe: Recipe) => void 
         {/* Ingredients input */}
         <div className="mt-4">
           <div className="flex flex-wrap gap-2">
-            {muse.ingredients.map((i) => (
-              <span key={i} className="chip" data-on="true">
-                {i}
-                <button onClick={() => removeIngredient(i)} aria-label={`Remove ${i}`} className="ml-0.5 rounded-full hover:bg-white/20">
-                  <X size={13} />
-                </button>
-              </span>
-            ))}
+            {muse.ingredients.map((i) => {
+              const known = INGREDIENT_POOL[muse.category].some((p) => normalizeIngredient(p) === normalizeIngredient(i))
+              return (
+                <span
+                  key={i}
+                  className="chip"
+                  data-on="true"
+                  style={known ? undefined : { borderStyle: 'dashed' }}
+                  title={known ? i : `${i} — your own ingredient; the Muse will build around it`}
+                >
+                  {!known && <Sparkles size={11} className="text-butter-ink" />}
+                  {i}
+                  <button onClick={() => removeIngredient(i)} aria-label={`Remove ${i}`} className="ml-0.5 rounded-full hover:bg-white/20">
+                    <X size={13} />
+                  </button>
+                </span>
+              )
+            })}
           </div>
           <div className="relative mt-2">
             <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-bark-muted" />
             <input
-              className="field pl-10"
-              placeholder={muse.category === 'food' ? 'Add an ingredient — chicken, miso, lemon…' : 'Add a spirit — gin, mezcal, aperol…'}
+              className="field pl-10 pr-24"
+              placeholder={muse.category === 'food' ? 'Any ingredient — chicken, miso, halloumi, anything…' : 'Any spirit or mixer — gin, mezcal, campari, anything…'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -129,12 +139,20 @@ export const Muse = ({ onOpenRecipe }: { onOpenRecipe: (recipe: Recipe) => void 
               }}
               aria-label="Add ingredient"
             />
-            {input && (
-              <button onClick={() => addIngredient(input)} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full bg-sage-deep p-1 text-cream" aria-label="Add">
-                <Plus size={14} />
+            {input.trim() && (
+              <button
+                onClick={() => addIngredient(input)}
+                className="btn-primary absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 text-xs"
+                aria-label={`Add ${input.trim()} to your ingredients`}
+              >
+                <Plus size={13} /> Add
               </button>
             )}
           </div>
+          <p className="mt-2 text-xs leading-relaxed text-bark-muted">
+            Anything goes — type what you actually have. Dashed chips are your own additions; the Muse matches what it
+            knows and builds real recipes around the rest.
+          </p>
 
           {/* Suggestions */}
           {suggestions.length > 0 && (
@@ -227,7 +245,7 @@ export const Muse = ({ onOpenRecipe }: { onOpenRecipe: (recipe: Recipe) => void 
           {fallback && (
             <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-butter/20 px-4 py-2 text-xs font-semibold text-butter-ink">
               <Sparkles size={13} />
-              Nothing matched every ingredient with those filters, so the Muse improvised from your pantry.
+              No shelf recipe fit those exact ingredients, so the Muse improvised around them — treat quantities as a starting point.
             </p>
           )}
 

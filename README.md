@@ -38,43 +38,49 @@ npm run dev        # http://localhost:5173
 ## Build & preview
 
 ```bash
-npm run build      # typecheck + bundle to dist/
+npm run build      # typecheck + bundle to dist/ (injects hashed assets into the service worker)
 npm run preview    # serve dist/ locally
-npm test           # headless engine tests (13 assertions on the recipe engine)
+npm test           # headless engine tests (17 assertions on the recipe engine)
 ```
 
-## Deploy to web (Vercel / Netlify / Pages)
+## Offline (PWA)
 
-The build in `dist/` is static — deploy it anywhere. SPA fallback not required (single route).
+The app is fully offline-capable. The service worker (`public/sw.js`) precaches the app shell
+*and* the hashed JS/CSS bundles at install time (the list is injected by `vite.config.ts`),
+so the **very first visit** already works offline. Assets are served stale-while-revalidate;
+navigations are network-first with a cache fallback. Data lives in `localStorage` — nothing
+needs the network after install. Bump `VERSION` in `public/sw.js` when shipping updates.
 
-## Ship to the App Store & Play Store (Capacitor)
+## Deploy to web (GitHub Pages — automatic)
 
-The project is PWA-first; wrap it with Capacitor for native stores:
+Deployment is wired in `.github/workflows/deploy.yml`: every push to `main` runs tests +
+build, then publishes `dist/` to GitHub Pages. Enable **Settings → Pages → Source: GitHub
+Actions** once; the live URL appears in the workflow run's `deploy` job.
+
+Any other static host works too — the build is fully relative (`base: './'`).
+
+## Ship to the Play Store (Capacitor — Android is set up)
+`The `android/` platform is committed and store-ready: app id `com.hearthhand.app`, adaptive
+launcher icons and splash screens already generated (`scripts/make-assets.mjs` →
+`npx @capacitor/assets generate --android`). Build the release bundle:
 
 ```bash
-npm i @capacitor/core @capacitor/cli
-npx cap init "Hearth & Hand" com.hearthhand.app --web-dir=dist
-npm i @capacitor/android @capacitor/ios
 npm run build
-npx cap add android
-npx cap add ios
-npx cap sync
-npx cap open android   # Android Studio → build AAB for Play
-npx cap open ios       # Xcode → archive for App Store
+npx cap sync android
+cd android && ./gradlew bundleRelease   # → app/build/outputs/bundle/release/app-release.aab
 ```
 
-A ready-to-edit `capacitor.config.json` is included; `npx cap init` can be skipped.
+Before your first upload, create a keystore and sign the bundle:
 
-Store metadata (description, keywords, privacy text) lives in `store/metadata.md`.
+```bash
+keytool -genkey -v -keystore hearth-hand.keystore -alias hearth-hand -keyalg RSA -keysize 2048 -validity 10000
+# then add signingConfig to android/app/build.gradle, or sign in Android Studio:
+#   Build → Generate Signed Bundle / APK → Android App Bundle
+```
 
-### Store checklist
-
-- [ ] Bundle ID `com.hearthhand.app` set in Xcode / Android Studio
-- [ ] App icons (1024×1024 App Store, 512×512 Play) — generate from `public/icon.svg`
-- [ ] Screenshots: 6.7" iPhone, 6.4/6.7" Android phone, 10" tablet
-- [ ] Privacy policy URL (app is fully offline/local — see `store/metadata.md`)
-- [ ] Age rating 4+ / Everyone
-- [ ] App Privacy: "Data Not Collected" (all data is local)
+Upload the `.aab` in the Play Console (create the app, fill the store listing from
+`store/metadata.md`, complete the data-safety form — the app collects no data). For iOS,
+add the platform with `npx cap add ios` and archive in Xcode.
 
 ## Project structure
 

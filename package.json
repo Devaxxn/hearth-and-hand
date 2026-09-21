@@ -11,11 +11,15 @@
     "test": "esbuild e2e/engine.test.ts --bundle --platform=node --format=esm --outfile=e2e/engine.test.mjs && node e2e/engine.test.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "lucide-react": "^0.544.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2",
     "@tailwindcss/vite": "^4.1.13",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
