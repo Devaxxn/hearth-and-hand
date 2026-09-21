@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Recipe } from '../types'
 import { totalTime } from '../lib/format'
-import { Check, ChevronLeft, ChevronRight, RotateCcw, X } from 'lucide-react'
+import { parseStepSeconds, formatCountdown } from '../lib/timer'
+import { startKitchenTimer } from './KitchenTimer'
+import { Check, ChevronLeft, ChevronRight, RotateCcw, Timer, X } from 'lucide-react'
 
 const PROGRESS_KEY = 'hearth-hand:cook-progress'
 
@@ -124,6 +126,31 @@ export const CookMode = ({ recipe, onClose }: { recipe: Recipe; onClose: () => v
                       <span className="cook-text block text-[17px] font-semibold leading-relaxed md:text-xl" style={{ color: isDone ? 'rgba(246,241,231,0.45)' : '#f6f1e7', textDecoration: isDone ? 'line-through' : 'none' }}>
                         {s.text}
                       </span>
+                      {(() => {
+                        const secs = parseStepSeconds(s.text)
+                        if (!secs) return null
+                        return (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              startKitchenTimer(secs, `Step ${i + 1} · ${recipe.title}`)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation()
+                                e.preventDefault()
+                                startKitchenTimer(secs, `Step ${i + 1} · ${recipe.title}`)
+                              }
+                            }}
+                            className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-cream/20 px-3 py-1 text-[11px] font-bold text-cream/80 transition hover:border-butter/60 hover:text-butter"
+                            aria-label={`Start a ${formatCountdown(secs)} timer for step ${i + 1}`}
+                          >
+                            <Timer size={12} /> Start {formatCountdown(secs)} timer
+                          </span>
+                        )
+                      })()}
                     </span>
                   </button>
                 </li>

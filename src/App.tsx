@@ -6,9 +6,13 @@ import { Muse } from './components/Muse'
 import { Shelf } from './components/Shelf'
 import { Basket } from './components/Basket'
 import { RecipeDetail } from './components/RecipeDetail'
+import { KitchenTimer } from './components/KitchenTimer'
+import { parseStepSeconds } from './lib/timer'
 import { useStore } from './store/useStore'
 import { totalTime } from './lib/format'
+import { useTheme } from './lib/theme'
 import { Flame, LibraryBig, ShoppingBasket, Sparkles, Heart } from 'lucide-react'
+import { Moon, Sun } from 'lucide-react'
 
 const SUBTITLES: Record<Route, string> = {
   muse: 'What are we making tonight?',
@@ -18,6 +22,7 @@ const SUBTITLES: Record<Route, string> = {
 
 export default function App() {
   const { data, setOnboarded } = useStore()
+  const [theme, toggleTheme] = useTheme()
   const [route, setRoute] = useState<Route>(() => {
     const saved = sessionStorage.getItem('hearth-hand:route')
     return saved === 'muse' || saved === 'shelf' || saved === 'basket' ? saved : 'muse'
@@ -48,6 +53,16 @@ export default function App() {
   }
   const latest = [...data.recipes].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
 
+  // durations the kitchen timer offers: steps of the open recipe (unique, longest first)
+  const timerDurations = detail
+    ? Array.from(
+        new Set<number>([
+          ...detail.steps.map((s) => parseStepSeconds(s.text) ?? 0).filter((s) => s > 0),
+          (detail.prepMinutes + detail.cookMinutes) * 60,
+        ].filter((s) => s > 0))
+      ).sort((a, b) => b - a)
+    : []
+
   return (
     <div className="min-h-full">
       <SideRail route={route} onNavigate={setRoute} basketCount={stats.basket} />
@@ -55,7 +70,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-4 md:pl-[17.5rem] md:pr-8 md:pt-8 md:pb-16">
         {route === 'muse' && (
           <>
-            <Header title="Kitchen & Bar Muse" subtitle={SUBTITLES.muse} />
+            <Header title="Kitchen & Bar Muse" subtitle={SUBTITLES.muse} theme={theme} onToggleTheme={toggleTheme} />
             <Muse onOpenRecipe={(r) => setDetailRecipe(r)} />
             {stats.total > 0 && (
               <section className="mt-10 hidden md:block">
@@ -76,14 +91,14 @@ export default function App() {
 
         {route === 'shelf' && (
           <>
-            <Header title="My Shelf" subtitle={SUBTITLES.shelf} />
+            <Header title="My Shelf" subtitle={SUBTITLES.shelf} theme={theme} onToggleTheme={toggleTheme} />
             <Shelf onOpenRecipe={(r) => setDetailRecipe(r)} />
           </>
         )}
 
         {route === 'basket' && (
           <>
-            <Header title="Smart Basket" subtitle={SUBTITLES.basket} />
+            <Header title="Smart Basket" subtitle={SUBTITLES.basket} theme={theme} onToggleTheme={toggleTheme} />
             <Basket />
           </>
         )}
@@ -97,12 +112,21 @@ export default function App() {
           <span className="stat"><Sparkles size={13} /> {stats.drinks} drinks</span>
           <span className="stat"><Heart size={13} /> {stats.favorites} favs</span>
           {stats.basket > 0 && <span className="stat"><ShoppingBasket size={13} /> {stats.basket} to buy</span>}
+          <button
+            onClick={toggleTheme}
+            className="theme-btn !h-7 !w-7 ml-1"
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+          </button>
         </div>
       </div>
 
       <BottomNav route={route} onNavigate={setRoute} basketCount={stats.basket} />
 
       {detail && <RecipeDetail recipe={detail} onClose={() => setDetailRecipe(null)} />}
+
+      <KitchenTimer durations={timerDurations} />
 
       {/* Onboarding */}
       {!data.onboarded && <Onboarding onDone={setOnboarded} />}

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
-import { Flame, LibraryBig, ShoppingBasket } from 'lucide-react'
+import { Flame, LibraryBig, Moon, ShoppingBasket, Sun } from 'lucide-react'
+import type { Theme } from '../lib/theme'
 
 export type Route = 'muse' | 'shelf' | 'basket'
 
@@ -104,14 +105,22 @@ export const SideRail = ({ route, onNavigate, basketCount }: { route: Route; onN
   </aside>
 )
 
-export const Header = ({ title, subtitle }: { title: string; subtitle: string }) => (
+export const Header = ({ title, subtitle, theme, onToggleTheme }: { title: string; subtitle: string; theme: Theme; onToggleTheme: () => void }) => (
   <header className="mb-5 flex items-center gap-3 pt-2 md:pt-0">
     <div className="md:hidden">
       <LogoMark size={38} />
     </div>
-    <div>
+    <div className="flex-1">
       <h1 className="font-display text-[26px] font-semibold leading-tight tracking-tight text-slate-deep md:text-4xl">{title}</h1>
       <p className="text-[13px] font-medium text-bark-muted md:text-sm">{subtitle}</p>
     </div>
+    <button
+      onClick={onToggleTheme}
+      className="theme-btn shrink-0"
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={theme === 'dark' ? 'Lights up' : 'Lights down'}
+    >
+      {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
   </header>
 )

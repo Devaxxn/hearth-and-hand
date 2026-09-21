@@ -16,6 +16,16 @@ and send ingredients straight to a smart, aisle-sorted shopping basket.
 - **Smart Shopping List** — one tap sends a recipe's ingredients to the basket, auto-grouped by
   aisle (Produce, Dairy, Pantry, Spirits & Liquids). Add items manually, check them off, clear
   crossed-off items.
+- **Serving-size calculator** — scale any recipe from ½× to 6× (±0.25 steps): quantities snap
+  to kitchen-friendly eighths ("1 1/4 oz"), countable things stay whole ("3 cloves"), "to taste"
+  entries are left alone, and the servings label re-pluralizes itself ("1 drink" → "2 drinks").
+- **Interactive kitchen timer** — floats above every screen, including Cook Mode. Step chips
+  ("Start 2:00 timer") parse durations straight from the instructions; quick presets (1/5/10/15
+  min) cover the rest. Start/pause/resume/restart, progress bar, chime + vibration when time's
+  up, and it keeps counting while you browse other recipes.
+- **Dark mode** — moon/sun toggle in the header (and on desktop's stats pill). Remembers your
+  choice, follows the OS preference on first run, and re-themes every surface for low-light
+  kitchens.
 - **Cook / Mix Mode** — full-screen step-by-step reading mode with big text, tap-to-complete
   steps, progress bar, keyboard navigation and a completion celebration.
 - **Installable PWA** — manifest, service worker, offline shell caching, app icons.

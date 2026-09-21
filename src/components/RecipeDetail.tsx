@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { IngredientCategory, Recipe } from '../types'
 import { dietLabel, ING_CATEGORY_LABEL, skillLabel, totalTime } from '../lib/format'
+import { parseServings, scaleIngredients, scaleServingsLabel } from '../lib/scale'
 import { useStore } from '../store/useStore'
 import { IngredientList, PairingRow } from './RecipeCard'
 import { CookMode } from './CookMode'
+import { ServingCalculator } from './ServingCalculator'
 import {
   Clock, ChefHat, Heart, ListChecks, Pencil, Play, ShoppingBasket, Sparkles, Trash2, Users, X,
 } from 'lucide-react'
@@ -15,9 +17,18 @@ export const RecipeDetail = ({ recipe, onClose }: { recipe: Recipe; onClose: () 
   const [cooking, setCooking] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [addedToast, setAddedToast] = useState(false)
+  // serving-size calculator state — resets when a different recipe opens
+  const [scale, setScale] = useState(1)
+  useEffect(() => setScale(1), [recipe.id])
 
   // live follow the stored version while editing elsewhere
   const live = data.recipes.find((r) => r.id === recipe.id) ?? recipe
+
+  // the main ingredient list scales in place; "to taste" entries pass through untouched
+  const liveIngredients = useMemo(
+    () => (scale === 1 ? live.ingredients : scaleIngredients(live.ingredients, scale)),
+    [live.ingredients, scale]
+  )
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && !cooking) onClose() }
@@ -30,6 +41,8 @@ export const RecipeDetail = ({ recipe, onClose }: { recipe: Recipe; onClose: () 
   }, [onClose, cooking])
 
   const added = data.basket.some((i) => i.recipeTitle === live.title && !i.checked)
+
+  const scaledServingsLabel = scale === 1 ? live.servings : scaleServingsLabel(live.servings, Math.max(1, Math.round(parseServings(live.servings) * scale)))
 
   const toast = () => {
     setAddedToast(true)
@@ -97,7 +110,7 @@ export const RecipeDetail = ({ recipe, onClose }: { recipe: Recipe; onClose: () 
         <div className="mt-5 flex flex-wrap gap-2">
           <span className="meta"><Clock size={13} /> {totalTime(live)}</span>
           <span className="meta"><ChefHat size={13} /> {skillLabel[live.skill]}</span>
-          <span className="meta"><Users size={13} /> {live.servings}</span>
+          <span className="meta"><Users size={13} /> {scaledServingsLabel}</span>
           {live.category === 'drink' && live.glassware && <span className="meta">🥃 {live.glassware}</span>}
           {live.diets.map((d) => (
             <span key={d} className="meta" style={{ background: 'rgba(201, 212, 189, 0.5)', color: 'var(--color-sage-deep)' }}>{dietLabel[d]}</span>
@@ -138,7 +151,8 @@ export const RecipeDetail = ({ recipe, onClose }: { recipe: Recipe; onClose: () 
           <section>
             <h3 className="font-display text-xl font-semibold text-slate-deep">Ingredients</h3>
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-bark-muted">for {live.servings.toLowerCase()}</p>
-            <IngredientList ingredients={live.ingredients} />
+            <IngredientList ingredients={liveIngredients} />
+            <ServingCalculator recipe={live} factor={scale} onScale={setScale} />
           </section>
           <section>
             <h3 className="font-display text-xl font-semibold text-slate-deep">{live.category === 'drink' ? 'Method' : 'Instructions'}</h3>
