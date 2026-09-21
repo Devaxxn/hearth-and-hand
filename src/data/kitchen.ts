@@ -1,4 +1,4 @@
-import type { AppData, Category, Diet, Ingredient, MuseState, Pairing, Recipe, RecipeHue, ShelfTag, Skill } from '../types'
+import type { AppData, Category, Diet, Ingredient, IngredientCategory, MuseState, Pairing, Recipe, RecipeHue, ShelfTag, Skill } from '../types'
 import { DEFAULT_MUSE } from '../types'
 
 /* ------------------------------------------------------------------ */
@@ -1070,7 +1070,7 @@ const DRINKS: RecipeTemplate[] = [
   },
 ]
 
-const ALL_TEMPLATES = [...FOOD, ...DRINKS]
+export const ALL_TEMPLATES = [...FOOD, ...DRINKS]
 
 /* ------------------------------------------------------------------ */
 /* Matching + generation                                               */
@@ -1104,13 +1104,98 @@ export const normalizeIngredient = (raw: string): string => {
   return ALIASES[key] ?? key
 }
 
-const templateMatchesIngredient = (t: RecipeTemplate, chip: string): boolean => {
-  const c = normalizeIngredient(chip)
-  if (t.keywords.some((k) => normalizeIngredient(k) === c)) return true
-  return t.ingredients.some((i) => {
-    const n = normalizeIngredient(i.name)
-    return n.includes(c) || c.includes(n)
+/* ------------------------------------------------------------------ */
+/* Fuzzy matching — lets free-text ingredients find real recipes        */
+/* ------------------------------------------------------------------ */
+
+/** words too generic (or pure prep descriptors) to identify an ingredient */
+const STOP_WORDS = new Set([
+  'fresh', 'frozen', 'dried', 'chopped', 'sliced', 'diced', 'minced', 'ground',
+  'shredded', 'grated', 'organic', 'large', 'small', 'medium', 'ripe', 'raw',
+  'cooked', 'leftover', 'extra', 'virgin', 'canned', 'bottled', 'jar', 'bunch',
+  'handful', 'splash', 'good', 'spicy', 'hot', 'cold', 'of', 'the', 'a', 'an',
+  'some', 'my', 'and', 'with', 'for', 'in', 'on', 'kind', 'pieces', 'piece',
+])
+
+const singular = (w: string): string => {
+  if (w.length > 4 && w.endsWith('ies')) return `${w.slice(0, -3)}y`
+  if (w.length > 3 && w.endsWith('es') && !w.endsWith('ses')) return w.slice(0, -2)
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1)
+  return w
+}
+
+/** canonical form of a single word for comparison */
+const canonWord = (w: string): string => singular(w.replace(/[^a-z0-9]/g, ''))
+
+/** meaningful words of a phrase, canonicalized and stop-word-filtered */
+const contentWords = (phrase: string): string[] =>
+  normalizeIngredient(phrase)
+    .split(' ')
+    .map(canonWord)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
+
+interface ChipMatch {
+  /** capped contribution of this chip to the recipe's score */
+  points: number
+  /** 1 when the chip identifies the recipe at all */
+  hit: boolean
+}
+
+/** how strongly one chip identifies one template (exported for tests) */
+export const matchChip = (t: RecipeTemplate, chip: string): ChipMatch => {
+  const chipWords = [...new Set(contentWords(chip))]
+  if (chipWords.length === 0) return { points: 0, hit: false }
+
+  const OPTIONAL_NOTE = /optional|garnish|if (using|on hand)|for serving/
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((w) => b.includes(w))
+
+  // an ingredient that IS the chip (same canonical word set, not a garnish)
+  // is the strongest signal: 'eggs' matches a recipe built on eggs, not one
+  // that merely uses egg noodles or offers an optional soft-boiled egg
+  const core = t.ingredients.some((i) => {
+    const iw = contentWords(i.name)
+    return sameSet(iw, chipWords) && !OPTIONAL_NOTE.test(i.note ?? '')
   })
+  if (core) return { points: 3, hit: true }
+
+  // chip contained inside another ingredient ('egg' in 'egg noodles',
+  // 'tomato' in 'cherry tomatoes') or listed only as an optional finish —
+  // real but secondary, and never allowed to outrank a core match
+  const inside = t.ingredients.some((i) => {
+    const iw = contentWords(i.name)
+    return chipWords.every((w) => iw.includes(w))
+  })
+  if (inside) return { points: 2, hit: true }
+
+  const c = normalizeIngredient(chip)
+  if (t.keywords.some((k) => normalizeIngredient(k) === c)) return { points: 2, hit: true }
+
+  const haystack = new Set<string>([
+    ...contentWords(t.title),
+    ...t.keywords.flatMap((k) => contentWords(k)),
+    ...t.ingredients.flatMap((i) => contentWords(`${i.name} ${i.note ?? ''}`)),
+  ])
+
+  const overlap = chipWords.filter((w) => haystack.has(w)).length
+  if (overlap === 0) return { points: 0, hit: false }
+
+  // multi-word chips ("chicken breast", "sweet potato") must mostly match
+  const strong = chipWords.length === 1 ? overlap >= 1 : overlap >= Math.ceil(chipWords.length / 2)
+  return { points: strong ? Math.min(2, overlap) : 1, hit: true }
+}
+
+/** total match strength of a template against all chips (0 = no connection) */
+const matchScore = (t: RecipeTemplate, chips: string[]): { score: number; hits: number } => {
+  let score = 0
+  let hits = 0
+  for (const chip of chips) {
+    const m = matchChip(t, chip)
+    if (m.hit) {
+      hits++
+      score += m.points
+    }
+  }
+  return { score, hits }
 }
 
 const filterTemplates = (state: MuseState): RecipeTemplate[] => {
@@ -1143,7 +1228,7 @@ const seededShuffle = <T,>(arr: T[], seed: number): T[] => {
 
 export interface GenerateResult {
   recipes: Recipe[]
-  /** true when no pick matched the chips, so the Muse improvised from the filtered pool */
+  /** true when no pick matched the chips, so the Muse improvised around them */
   fallback: boolean
 }
 
@@ -1160,19 +1245,305 @@ export const generateResult = (state: MuseState, count = 6, seed = Date.now()): 
 
   if (chips.length === 0) return finish(seededShuffle(pool, seed), false)
 
-  const withScore = pool
-    .map((t) => ({ t, hits: chips.filter((c) => templateMatchesIngredient(t, c)).length }))
+  const scored = pool
+    .map((t) => ({ t, ...matchScore(t, chips) }))
     .filter((x) => x.hits > 0)
-    .sort((a, b) => b.hits - a.hits)
+    .sort((a, b) => b.score - a.score || b.hits - a.hits)
 
-  if (withScore.length === 0) return finish(seededShuffle(pool, seed), true)
+  if (scored.length === 0) {
+    // nothing in the filtered pool connects to the chips — improvise around them
+    return finish(improvise(state, chips, pool, seed, count), true)
+  }
 
-  let ranked = withScore.map((x) => x.t)
+  // a chip with no identity-level match anywhere (only weak word overlap) is a
+  // custom / off-list ingredient: weave IT into improvised recipes while real
+  // matches stay as the supporting cast — instead of silently ignoring it
+  const weakChips = chips.filter((c) => !pool.some((t) => matchChip(t, c).points >= 2))
+  if (weakChips.length > 0) {
+    const rest = pool.filter((t) => !scored.some((s) => s.t === t))
+    const filler = [...scored.map((x) => x.t), ...seededShuffle(rest, seed + 1)]
+    return finish(improvise(state, weakChips, pool, seed, count, filler), true)
+  }
+
+  let ranked = scored.map((x) => x.t)
   if (ranked.length < count) {
     const extra = seededShuffle(pool.filter((t) => !ranked.includes(t)), seed)
     ranked = [...ranked, ...extra]
   }
   return finish(ranked, false)
+}
+
+/* ------------------------------------------------------------------ */
+/* Improv engine — weaves custom / off-list ingredients into recipes   */
+/* ------------------------------------------------------------------ */
+
+const titleCase = (phrase: string): string =>
+  phrase
+    .split(' ')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ')
+
+/** best-guess shopping aisle for an arbitrary user-typed ingredient */
+export const guessCategory = (name: string): IngredientCategory => {
+  const wordList = contentWords(name)
+  const words = wordList.join(' ')
+  if (/(cheese|yogurt|butter|egg|milk|cream|feta|parmesan|ricotta|mozzarella|cheddar|halloumi|ghee)\b/.test(words) || wordList.includes('eggs')) return 'dairy'
+  if (/(?<![a-z])(flour|sugar|rice|pasta|noodle|oat|quinoa|bean|lentil|chickpea|stock|broth|oil|vinegar|salt|honey|maple|mustard|soy|sauce|spice|cumin|paprika|turmeric|cinnamon|cornstarch|crumb|tortilla|bread|tofu|tempeh|seed|nut)\b/.test(words)) return 'pantry'
+  if (/(?<![a-z])(vodka|gin|rum|whiskey|bourbon|rye|tequila|mezcal|cognac|liqueur|cordial|vermouth|aperol|campari|wine|prosecco|champagne|sake|sherry|marsala|beer|ale|cider|bitters|syrup|juice|water|tonic|cola|coffee|espresso|kombucha)\b/.test(words)) return 'spirits'
+  return 'produce'
+}
+
+const guessQuantity = (name: string, category: IngredientCategory): string => {
+  const words = contentWords(name).join(' ')
+  if (category === 'spirits') return '2 oz'
+  if (/(egg)/.test(words)) return '3'
+  if (/(onion|pepper|carrot|zucchini|cucumber|avocado|lemon|lime|orange|apple|banana|tomato|potato|head|clove)/.test(words)) return '2'
+  if (category === 'dairy') return '1 cup'
+  if (category === 'pantry') return '2 tbsp'
+  return '1 cup'
+}
+
+interface ImprovBase {
+  pattern: (star: string) => string
+  emoji: string
+  hue: RecipeHue
+  prep: number
+  cook: number
+  occasion: RecipeTemplate['occasion']
+  tags: ShelfTag[]
+  blurb: string
+  glassware?: string
+  steps: TemplateStep[]
+  pairings: Pairing[]
+}
+
+const FOOD_BASES: ImprovBase[] = [
+  {
+    pattern: (s) => `${s} & Everything Skillet`,
+    emoji: '🍳', hue: 'clay', prep: 10, cook: 15,
+    occasion: 'everyday', tags: ['one-pan'],
+    blurb: 'A flexible one-pan built around your list — hardest items sear first, delicate ones finish last.',
+    steps: [
+      { text: 'Get a heavy pan properly hot over medium-high while you chop your starred ingredients into even, bite-size pieces.', emphasis: 'start' },
+      { text: 'Sear the heartiest items undisturbed until golden, then work in the aromatics — garlic first, softest things last.', emphasis: 'middle', minutes: 8 },
+      { text: 'Deglaze with a splash of water or stock, scraping the browned bits into a quick pan sauce.', emphasis: 'middle', minutes: 3 },
+      { text: 'Wilt in any greens and fold everything through the fat and juices.', emphasis: 'middle', minutes: 4 },
+      { text: 'Finish off the heat with lemon and salt — taste and adjust before it leaves the pan.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Crusty bread', note: 'For the pan sauce — non-negotiable.' },
+      { kind: 'zero-proof', name: 'Sparkling water with lime', note: 'Palate reset between rich bites.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Harvest Bowl`,
+    emoji: '🥗', hue: 'sage', prep: 15, cook: 15,
+    occasion: 'everyday', tags: ['fresh'],
+    blurb: 'Bowls forgive everything: a grain base, charred vegetables, your list on top, quick lemon dressing over all.',
+    steps: [
+      { text: 'Cook your grain or base according to the package while you chop the rest.', emphasis: 'start' },
+      { text: 'Roast or char the sturdy vegetables at 425°F with olive oil until caramelized at the edges.', emphasis: 'middle', minutes: 14 },
+      { text: 'Whisk a quick dressing: lemon, olive oil, something creamy if you have it, salt, pepper.', emphasis: 'middle' },
+      { text: 'Build the bowls — base first, then vegetables, then anything delicate, briny or soft.', emphasis: 'middle' },
+      { text: 'Flood with dressing and finish with crunch: toasted nuts or seeds.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'wine', name: 'Grüner Veltliner', note: 'White-pepper notes love roasted vegetables.' },
+      { kind: 'side', name: 'Warm flatbread', note: 'Turns the bowl into a spread.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Comfort Stew`,
+    emoji: '🍲', hue: 'butter', prep: 15, cook: 30,
+    occasion: 'cozy-night-in', tags: ['comfort'],
+    blurb: 'One pot, layered in stages so every ingredient keeps its character — the safest way to honor a random list.',
+    steps: [
+      { text: 'Sweat onion and garlic in olive oil until translucent and sweet.', emphasis: 'start', minutes: 6 },
+      { text: 'Toast the spices in the pot until the kitchen smells like spice.', emphasis: 'middle', minutes: 1 },
+      { text: 'Add the hearty items and enough water or stock to cover; simmer until tender.', emphasis: 'middle', minutes: 20 },
+      { text: 'Add quick-cooking items for the last minutes so nothing turns to mush.', emphasis: 'middle', minutes: 5 },
+      { text: 'Season aggressively at the end and brighten with lemon; serve over grains or with bread.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Buttered crusty bread', note: 'The official stew utensil.' },
+      { kind: 'wine', name: 'Syrah', note: 'Black-pepper notes for deep, dark stews.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Melt`,
+    emoji: '🧀', hue: 'butter', prep: 5, cook: 5,
+    occasion: 'everyday', tags: ['comfort'],
+    blurb: 'Anything between two buttered slices under a weighted pan — the fastest honest meal your list can become.',
+    steps: [
+      { text: 'Butter the outside of two slices of bread.', emphasis: 'start' },
+      { text: 'Layer cheese, then your chopped ingredients, then cheese again — cheese glue holds the melt together.', emphasis: 'middle' },
+      { text: 'Griddle over medium-low until deeply golden, pressing gently; flip once.', emphasis: 'middle', minutes: 4 },
+      { text: 'Rest a minute, slice on the diagonal, and salt the crusts.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Tomato soup', note: 'The legally required companion.' },
+      { kind: 'zero-proof', name: 'Dill pickle brine shot', note: 'Trust the process.' },
+    ],
+  },
+]
+
+const DRINK_BASES: ImprovBase[] = [
+  {
+    pattern: (s) => `${s} Highball`,
+    emoji: '🥃', hue: 'slate', prep: 5, cook: 0,
+    occasion: 'everyday', tags: ['no-cook'],
+    glassware: 'Highball',
+    blurb: 'The most forgiving drink there is: spirit, fizz, citrus to taste — your list does the talking.',
+    steps: [
+      { text: 'Fill a tall glass completely with ice.', emphasis: 'start' },
+      { text: 'Add your featured spirits and juices over the ice.', emphasis: 'middle' },
+      { text: 'Top with soda water, pouring down the side to keep the fizz.', emphasis: 'middle' },
+      { text: 'Stir once, taste, adjust citrus or sweetness, and garnish with what you have.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Salted nuts', note: 'Salt makes both the drink and the snack disappear.' },
+      { kind: 'zero-proof', name: 'The same build, minus spirits', note: 'Everyone gets a glass.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Garden Smash`,
+    emoji: '🌿', hue: 'sage', prep: 5, cook: 0,
+    occasion: 'brunch', tags: ['fresh', 'no-cook'],
+    glassware: 'Rocks glass',
+    blurb: 'Muddle something tender, add your spirit and citrus — a smash accepts almost any ingredient gracefully.',
+    steps: [
+      { text: 'Muddle tender herbs or fruit gently in the base of the shaker.', emphasis: 'start' },
+      { text: 'Add spirits, citrus and syrup with ice; shake hard 12 seconds.', emphasis: 'middle', minutes: 1 },
+      { text: 'Double-strain over fresh ice.', emphasis: 'middle' },
+      { text: 'Garnish with whatever you muddled — smell is half the drink.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Fried chicken', note: 'Herbal, crisp, cold — the classic trio.' },
+      { kind: 'zero-proof', name: 'Mint-lime cooler', note: 'Same garden, gentler path.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Spritz`,
+    emoji: '🍊', hue: 'butter', prep: 4, cook: 0,
+    occasion: 'brunch', tags: ['citrusy', 'no-cook'],
+    glassware: 'Balloon wine glass',
+    blurb: 'Bubbly, bitter or bright — the 3-2-1 formula turns your ingredients into golden hour.',
+    steps: [
+      { text: 'Fill a wine glass with ice.', emphasis: 'start' },
+      { text: 'Pour 3 parts bubbly, 2 parts your featured bitter or spirit, 1 part soda.', emphasis: 'middle' },
+      { text: 'Give one lazy stir to combine without killing the bubbles.', emphasis: 'middle' },
+      { text: 'Crown with an orange slice or whatever citrus is around.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Olives & potato chips', note: 'The Venetian standard, unchanged.' },
+      { kind: 'zero-proof', name: 'Blood orange soda', note: 'Same color, softer soul.' },
+    ],
+  },
+  {
+    pattern: (s) => `${s} Rickey`,
+    emoji: '🍸', hue: 'slate', prep: 4, cook: 0,
+    occasion: 'everyday', tags: ['citrusy', 'no-cook'],
+    glassware: 'Highball',
+    blurb: 'Spirit, real lime, nothing sweet to hide behind — the cleanest possible frame for a new ingredient.',
+    steps: [
+      { text: 'Squeeze half a lime into a tall glass, then drop the shell in.', emphasis: 'start' },
+      { text: 'Add your featured spirit over plenty of ice.', emphasis: 'middle' },
+      { text: 'Top with soda water and lift once with a bar spoon.', emphasis: 'middle' },
+      { text: 'Taste before sweetening — a rickey should feel bright, not sour.', emphasis: 'end' },
+    ],
+    pairings: [
+      { kind: 'side', name: 'Grilled anything', note: 'Char and citrus are old friends.' },
+      { kind: 'zero-proof', name: 'Lime rickey, zero-proof', note: 'Just skip the spirit.' },
+    ],
+  },
+]
+
+/**
+ * diet-conflict guard: a chip that contradicts an active dietary need is never
+ * woven into improvised recipes — the diet filter stays a hard promise
+ */
+const CONFLICT_WORDS: Partial<Record<Diet, RegExp>> = {
+  vegan: /(chicken|beef|pork|bacon|fish|salmon|shrimp|tuna|cod|meat|steak|egg|dairy|milk|butter|cheese|cream|yogurt|feta|parmesan|ricotta|mozzarella|cheddar|honey|worcester)/,
+  vegetarian: /(chicken|beef|pork|bacon|fish|salmon|shrimp|tuna|cod|meat|steak|gelatin)/,
+  'dairy-free': /(dairy|milk|butter|cheese|cream|yogurt|feta|parmesan|ricotta|mozzarella|cheddar)/,
+  'gluten-free': /(wheat|flour|bread|bulgur|couscous|barley|semolina|pasta|noodle|soy sauce)/,
+  'nut-free': /(peanut|almond|cashew|walnut|pecan|pistachio|hazelnut|marcona|nut)/,
+}
+
+const conflictsWithDiets = (chip: string, diets: Diet[]): boolean =>
+  diets.some((d) => CONFLICT_WORDS[d]?.test(chip) ?? false)
+
+/** neutral supporting cast that keeps an improvised dish/drink coherent; respects diet needs */
+const improvAnchors = (isDrink: boolean, diets: Diet[]) => {
+  const noDairy = diets.includes('vegan') || diets.includes('dairy-free')
+  const anchors = isDrink
+    ? [
+        ing('2 oz', 'soda water', 'pantry', 'to top'),
+        ing('3/4 oz', 'lime juice', 'produce'),
+        ing('1/2 oz', 'simple syrup', 'pantry'),
+      ]
+    : [
+        ing('2 tbsp', 'olive oil', 'pantry'),
+        ing('3 cloves', 'garlic', 'produce'),
+        ing('1', 'lemon', 'produce', 'brightens everything'),
+        ing('to taste', 'salt & black pepper', 'pantry'),
+      ]
+  if (!isDrink && !noDairy) anchors.push(ing('2 tbsp', 'butter', 'dairy'))
+  if (!isDrink && !diets.includes('vegan')) anchors.push(ing('1/2 cup', 'parmesan', 'dairy', 'optional'))
+  return anchors
+}
+
+const improvise = (state: MuseState, chips: string[], pool: RecipeTemplate[], seed: number, count = 6, filler?: RecipeTemplate[]): RecipeTemplate[] => {
+  const isDrink = state.category === 'drink'
+
+  // woven bases must respect the user's time budget where possible — the Muse
+  // bends around unknown ingredients, not around stated constraints
+  const qualifying = (isDrink ? DRINK_BASES : FOOD_BASES).filter((b) => b.prep + b.cook <= state.prepTime)
+  // a prep limit below the quickest base would otherwise yield only filler —
+  // keep the nearest matches so improvisation still names the ingredient
+  const bases = seededShuffle(qualifying.length > 0 ? qualifying : isDrink ? DRINK_BASES : FOOD_BASES, seed)
+
+  // only weave chips that respect the active dietary needs
+  const weave = chips.filter((c) => !conflictsWithDiets(c, state.diets))
+  if (weave.length === 0) return filler ?? seededShuffle(pool, seed + 1)
+
+  const woven: RecipeTemplate[] = bases.map((base) => ({
+    title: base.pattern(titleCase(weave[0])),
+    category: state.category,
+    emoji: base.emoji,
+    hue: base.hue,
+    blurb: base.blurb,
+    servings: isDrink ? '1 drink' : 'Serves 2',
+    prep: base.prep,
+    cook: base.cook,
+    skill: 'easy',
+    diets: [],
+    occasion: base.occasion,
+    tags: base.tags,
+    keywords: [...weave],
+    ingredients: [
+      ...weave.slice(0, 4).map((name) => ing(guessQuantity(name, guessCategory(name)), name, guessCategory(name))),
+      ...weave.slice(4).map((name) => ing(guessQuantity(name, guessCategory(name)), name, guessCategory(name), 'use if on hand')),
+      ...improvAnchors(isDrink, state.diets),
+    ],
+    steps: base.steps,
+    pairings: base.pairings,
+    glassware: base.glassware,
+    museNote: `Improvised around ${weave.join(', ')} — quantities are starting points; taste as you go.`,
+  }))
+
+  // filler stays inside the user's filter envelope (skill, prep, diet, category)
+  // — improv adds recipes around the chips; it never breaks the stated filters
+  const blended = [...woven, ...(filler ?? seededShuffle(pool, seed + 1))]
+  const seen = new Set<string>()
+  const out: RecipeTemplate[] = []
+  for (const t of blended) {
+    if (seen.has(t.title)) continue
+    seen.add(t.title)
+    out.push(t)
+    if (out.length >= count) break
+  }
+  return out
 }
 
 export const generateRecipes = (state: MuseState, count = 6, seed = Date.now()): Recipe[] =>

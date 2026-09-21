@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { seedData, generateResult, normalizeIngredient, totalMinutes, SURPRISE_STATES } from '../src/data/kitchen'
+import { seedData, generateResult, normalizeIngredient, totalMinutes, SURPRISE_STATES, guessCategory } from '../src/data/kitchen'
 import { totalTime, dietLabel, hueClass, ING_CATEGORY_ORDER } from '../src/lib/format'
 
 let passed = 0
@@ -121,6 +121,60 @@ check('totalMinutes/totalTime formatting', () => {
 })
 
 /* ---------------- maps cover the domain ---------------- */
+check('fuzzy matching: plurals, phrases and off-list items find recipes', () => {
+  // 'chicken breast' — 'breast' is unknown, 'chicken' must still score
+  const chicken = generateResult({ category: 'food', ingredients: ['chicken breast'], prepTime: 60, diets: [], skill: 'advanced' }, 6, 3)
+  assert.ok(chicken.recipes[0].title.includes('Chicken'), 'chicken breast should rank chicken recipes first')
+  // plural free-text
+  const eggs = generateResult({ category: 'food', ingredients: ['eggs'], prepTime: 60, diets: [], skill: 'advanced' }, 6, 3)
+  assert.ok(eggs.recipes[0].title.includes('Shakshuka') || eggs.recipes[0].title.includes('Omelet'), 'eggs should rank egg dishes first')
+  // prep-descriptor noise must not break matching
+  const fresh = generateResult({ category: 'food', ingredients: ['fresh cherry tomatoes'], prepTime: 60, diets: [], skill: 'advanced' }, 6, 3)
+  assert.ok(fresh.recipes.some((r) => r.title.includes('Tomatoes')), 'fresh cherry tomatoes should match tomato recipes')
+})
+
+check('improv engine: unknown custom ingredients produce coherent woven recipes', () => {
+  const { recipes, fallback } = generateResult(
+    { category: 'food', ingredients: ['halloumi'], prepTime: 30, diets: [], skill: 'easy' },
+    6, 9
+  )
+  assert.equal(fallback, true)
+  assert.ok(recipes.length >= 3, 'should return woven recipes')
+  for (const r of recipes.slice(0, 3)) {
+    assert.ok(r.title.includes('Halloumi'), `woven title should name the ingredient: ${r.title}`)
+    assert.ok(r.ingredients.some((i) => i.name === 'halloumi'), 'woven recipe should include the ingredient')
+    assert.ok(r.ingredients.some((i) => i.name.includes('garlic')), 'woven recipe should include pantry anchors')
+    assert.ok(r.museNote.includes('Improvised'), 'woven recipe should carry an improv note')
+  }
+})
+
+check('improv engine: custom ingredients get sane aisles and quantities', () => {
+  assert.equal(guessCategory('gouda cheese'), 'dairy')
+  assert.equal(guessCategory('sake'), 'spirits')
+  assert.equal(guessCategory('kale'), 'produce')
+  const { recipes } = generateResult(
+    { category: 'drink', ingredients: ['elderflower liqueur'], prepTime: 15, diets: [], skill: 'advanced' },
+    6, 11
+  )
+  const woven = recipes.find((r) => r.museNote.includes('Improvised'))
+  assert.ok(woven, 'unknown spirit should improvise a drink')
+  const elf = woven!.ingredients.find((i) => i.name === 'elderflower liqueur')
+  assert.ok(elf, 'custom spirit should be woven in')
+  assert.equal(elf!.category, 'spirits', 'custom spirit should land in the spirits aisle')
+  assert.match(elf!.quantity, / oz/, 'custom spirit should get a measured pour')
+})
+
+check('improv engine: diet filters stay hard even when improvising', () => {
+  const { recipes } = generateResult(
+    { category: 'food', ingredients: ['halloumi', 'spinach'], prepTime: 45, diets: ['vegan'], skill: 'easy' },
+    6, 5
+  )
+  for (const r of recipes) {
+    const names = r.ingredients.map((i) => i.name.toLowerCase()).join(' ')
+    assert.ok(!names.includes('feta') && !names.includes('butter') && !names.includes('parmesan'), `${r.title} must stay vegan`)
+  }
+})
+
 check('every Surprise Me preset yields at least one recipe', () => {
   for (const preset of SURPRISE_STATES) {
     const { recipes } = generateResult(preset, 6, 7)

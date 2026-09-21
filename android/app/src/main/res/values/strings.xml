@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hearth &amp; Hand</string>
+    <string name="title_activity_main">Hearth &amp; Hand</string>
+    <string name="package_name">com.hearthhand.app</string>
+    <string name="custom_url_scheme">com.hearthhand.app</string>
+</resources>
