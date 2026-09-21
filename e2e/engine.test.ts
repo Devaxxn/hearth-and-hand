@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { seedData, generateResult, normalizeIngredient, totalMinutes, SURPRISE_STATES, guessCategory } from '../src/data/kitchen'
 import { totalTime, dietLabel, hueClass, ING_CATEGORY_ORDER } from '../src/lib/format'
+import { parseServings, parseQuantity, formatQuantity, formatAmount, scaleIngredients, scaleServingsLabel } from '../src/lib/scale'
+import { parseStepSeconds, formatCountdown } from '../src/lib/timer'
+import type { Ingredient } from '../src/types'
 
 let passed = 0
 const failures: string[] = []
@@ -186,6 +189,85 @@ check('format maps cover every enum value', () => {
   for (const hue of ['cream', 'sage', 'clay', 'slate', 'butter'] as const) assert.ok(hueClass[hue])
   for (const d of ['vegan', 'vegetarian', 'gluten-free', 'keto', 'dairy-free', 'nut-free'] as const) assert.ok(dietLabel[d])
   assert.deepEqual(ING_CATEGORY_ORDER, ['produce', 'dairy', 'pantry', 'spirits', 'other'])
+})
+
+// ------------------------------------------------------------------
+// serving-size calculator
+// ------------------------------------------------------------------
+
+check('servings labels parse to base counts', () => {
+  assert.equal(parseServings('Serves 4'), 4)
+  assert.equal(parseServings('Makes 6'), 6)
+  assert.equal(parseServings('1 drink'), 1)
+  assert.equal(parseServings('Serves 12'), 12)
+  assert.equal(parseServings('a generous spread'), 2) // fallback
+})
+
+check('quantity parsing handles fractions, wholes, and non-scalable text', () => {
+  assert.deepEqual(parseQuantity('2 tbsp'), { amount: 2, unit: 'tbsp' })
+  assert.deepEqual(parseQuantity('3/4 oz'), { amount: 0.75, unit: 'oz' })
+  assert.deepEqual(parseQuantity('1 1/2 cups'), { amount: 1.5, unit: 'cups' })
+  assert.deepEqual(parseQuantity('8'), { amount: 8, unit: '' })
+  assert.equal(parseQuantity('to taste'), null)
+  assert.equal(parseQuantity('a handful'), null)
+})
+
+check('amount formatting snaps to kitchen fractions', () => {
+  assert.equal(formatAmount(1.75), '1 3/4')
+  assert.equal(formatAmount(0.5), '1/2')
+  assert.equal(formatAmount(0.375), '3/8')
+  assert.equal(formatAmount(6), '6')
+})
+
+check('formatQuantity pluralizes naturally', () => {
+  assert.equal(formatQuantity(2, 'cups'), '2 cups')
+  assert.equal(formatQuantity(1, 'cups'), '1 cup')
+  assert.equal(formatQuantity(4, 'cloves'), '4 cloves')
+  assert.ok(/^1 clove(s)?$/.test(formatQuantity(0.5, 'cloves')), 'count units round to a whole, singular clove')
+})
+
+check('doubling scales measure and count units, never prose', () => {
+  const base: Ingredient[] = [
+    { quantity: '2 tbsp', name: 'Olive oil', category: 'pantry' },
+    { quantity: '3 cloves', name: 'Garlic', category: 'produce' },
+    { quantity: '1 1/2 cups', name: 'Stock', category: 'pantry' },
+    { quantity: 'to taste', name: 'Salt', category: 'pantry' },
+  ]
+  const out = scaleIngredients(base, 2)
+  assert.equal(out[0].quantity, '4 tbsp')
+  assert.equal(out[1].quantity, '6 cloves')
+  assert.equal(out[2].quantity, '3 cups')
+  assert.equal(out[3].quantity, 'to taste') // untouched
+})
+
+check('halving keeps kitchen-friendly minimums', () => {
+  const out = scaleIngredients([{ quantity: '1 tbsp', name: 'Butter', category: 'dairy' }, { quantity: '1 slice', name: 'Bread', category: 'pantry' }], 0.5)
+  assert.equal(out[0].quantity, '1/2 tbsp')
+  assert.equal(out[1].quantity, '1 slice') // counts never drop below 1
+})
+
+check('servings labels rescale with correct plurals', () => {
+  assert.equal(scaleServingsLabel('Serves 2', 6), 'Serves 6')
+  assert.equal(scaleServingsLabel('1 drink', 2), '2 drinks')
+  assert.equal(scaleServingsLabel('2 drinks', 1), '1 drink')
+  assert.equal(scaleServingsLabel('Makes 6', 12), 'Makes 12')
+})
+
+// ------------------------------------------------------------------
+// interactive timer
+// ------------------------------------------------------------------
+
+check('step durations parse, longest wins', () => {
+  assert.equal(parseStepSeconds('Simmer for 10 minutes until glossy'), 600)
+  assert.equal(parseStepSeconds('Toast 2 minutes, then simmer 10 minutes'), 600)
+  assert.equal(parseStepSeconds('Chill for 1 hour'), 3600)
+  assert.equal(parseStepSeconds('Stir briefly and serve'), null)
+})
+
+check('countdown formatting covers minutes and hours', () => {
+  assert.equal(formatCountdown(125), '2:05')
+  assert.equal(formatCountdown(3725), '1:02:05')
+  assert.equal(formatCountdown(0), '0:00')
 })
 
 console.log('\n' + (failures.length === 0 ? `ALL ${passed} CHECKS PASSED` : `${failures.length} FAILED: ${failures.join(', ')}`))

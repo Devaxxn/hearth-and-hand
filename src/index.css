@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* class-based dark mode: <html class="dark"> (set by the theme toggle) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-cream: #f6f1e7;
   --color-parchment: #efe7d7;
@@ -45,6 +48,99 @@ body {
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark mode — “lights down for the kitchen”                            */
+/* ------------------------------------------------------------------ */
+
+html.dark {
+  color-scheme: dark;
+}
+html.dark body {
+  --color-cream: #1c1a17;
+  --color-parchment: #232019;
+  --color-linen: #2b2720;
+  --color-sage: #96ab86;
+  --color-sage-soft: #3a4634;
+  --color-clay: #d68b6d;
+  --color-butter: #ecc06f;
+  --color-bark: #d9d0c0;
+  --color-bark-muted: #9d9282;
+  color: var(--color-bark);
+}
+/* text-ink stays deep in light mode, goes near-black-on-dark via cream ink */
+html.dark {
+  --ink: #eee7d8; /* readable ink on dark surfaces */
+  --surface: #232019;
+  --surface-raised: #2b2720;
+  --border-warm: rgba(233, 222, 198, 0.14);
+}
+html {
+  --ink: var(--color-slate-deep);
+  --surface: #fffdf8;
+  --surface-raised: rgba(255, 253, 248, 0.6);
+  --border-warm: rgba(74, 63, 53, 0.1);
+}
+html.dark .text-slate-deep,
+html.dark .text-bark { color: var(--ink); }
+html.dark .text-bark-muted { color: var(--color-bark-muted); }
+
+html.dark .card-tile {
+  border-color: var(--border-warm);
+  background: linear-gradient(150deg, #2e2a23 0%, var(--chip, #262219) 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -14px rgba(0, 0, 0, 0.5);
+}
+html.dark .hue-cream { --chip: #262219; --chip-ink: #cdc2ac; }
+html.dark .hue-sage { --chip: #2e3529; --chip-ink: #b4c6a5; }
+html.dark .hue-clay { --chip: #3a2b23; --chip-ink: #e2a68b; }
+html.dark .hue-slate { --chip: #262b2e; --chip-ink: #b7c3ca; }
+html.dark .hue-butter { --chip: #352c1d; --chip-ink: #e5c384; }
+
+html.dark .btn-primary {
+  background: linear-gradient(135deg, #6d8260 0%, #46545e 100%);
+  color: #f2ede1;
+}
+html.dark .btn-soft {
+  background: rgba(150, 171, 134, 0.16);
+  color: #b4c6a5;
+}
+html.dark .btn-soft:hover { background: rgba(150, 171, 134, 0.28); }
+
+html.dark .field {
+  border-color: var(--border-warm);
+  background: #211e18;
+  color: var(--ink);
+}
+html.dark .chip {
+  border-color: var(--border-warm);
+  background: #2a2620;
+  color: var(--color-bark-muted);
+}
+html.dark .chip[data-on="true"] { background: #6d8260; border-color: #6d8260; color: #f2ede1; }
+
+html.dark .meta {
+  background: rgba(43, 39, 32, 0.85);
+  border-color: var(--border-warm);
+}
+
+html.dark .shelf-wood {
+  background:
+    radial-gradient(1200px 400px at 50% -80px, rgba(236, 192, 111, 0.07), transparent 60%),
+    repeating-linear-gradient(90deg, rgba(233, 222, 198, 0.04) 0 2px, transparent 2px 9px),
+    linear-gradient(180deg, #232019 0%, #1f1c16 100%);
+}
+
+html.dark .sk {
+  background: linear-gradient(90deg, #2b2720 25%, #332e26 50%, #2b2720 75%);
+}
+
+/* dark surfaces for white-glass panels */
+html.dark [class*="bg-white/"] {
+  background-color: rgba(255, 253, 248, 0.07);
+}
+html.dark [class*="bg-white/"]:where(.btn-soft, .chip, .meta) {
+  background-color: inherit; /* let component classes win */
 }
 
 /* keep iOS input zoom away */
@@ -206,4 +302,25 @@ input, select, textarea, button { font-size: 16px; }
   text-decoration-color: rgba(127, 148, 112, 0.7);
 }
 
-::selection { background: rgba(233, 180, 92, 0.4); }
+::selection { background: rgba(236, 192, 111, 0.4); }
+
+/* theme toggle */
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.4rem;
+  width: 2.4rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(74, 63, 53, 0.14);
+  background: rgba(255, 253, 248, 0.8);
+  color: var(--color-bark-muted);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+.theme-btn:hover { color: var(--color-butter-ink, #8a651f); transform: scale(1.05); }
+.theme-btn:active { transform: scale(0.96); }
+html.dark .theme-btn {
+  border-color: var(--border-warm);
+  background: rgba(43, 39, 32, 0.85);
+  color: var(--color-butter);
+}
