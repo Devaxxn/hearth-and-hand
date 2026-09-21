@@ -1,0 +1,17 @@
+{
+  "appId": "com.hearthhand.app",
+  "appName": "Hearth & Hand",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#f6f1e7"
+  },
+  "android": {
+    "backgroundColor": "#f6f1e7",
+    "allowMixedContent": false
+  }
+}
